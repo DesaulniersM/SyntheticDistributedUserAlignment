@@ -2,3 +2,11 @@
 *.venv
 *venv
 *__pycache__
+results/
+*.ply
+*.png
+*.csv
+node_*_view.png
+render_test.png
+visual_features_test.png
+unified_map.ply

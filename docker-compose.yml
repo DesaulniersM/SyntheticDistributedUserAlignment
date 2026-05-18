@@ -3,23 +3,27 @@ version: '3.3'
 services:
   scanner:
     build: .
-    command: python ScannerService.py
+    command: python environment/ScannerService.py
     ports:
       - "8000:8000"
     environment:
-      - MESH_PATH=labModel.obj
+      - MESH_PATH=/app/replica_office1.ply
+    volumes:
+      - ./data:/app/data
     networks:
       - lab-network
 
   node1:
     build: .
-    command: python MobileNode.py
+    command: python agents/MobileNode.py
     ports:
       - "8001:8001"
     environment:
       - NODE_ID=node1
       - SCANNER_URL=http://scanner:8000
       - PORT=8001
+    volumes:
+      - ./data:/app/data
     depends_on:
       - scanner
     networks:
@@ -27,13 +31,79 @@ services:
 
   node2:
     build: .
-    command: python MobileNode.py
+    command: python agents/MobileNode.py
     ports:
       - "8002:8002"
     environment:
       - NODE_ID=node2
       - SCANNER_URL=http://scanner:8000
       - PORT=8002
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - scanner
+    networks:
+      - lab-network
+
+  node3:
+    build: .
+    command: python agents/MobileNode.py
+    ports:
+      - "8003:8003"
+    environment:
+      - NODE_ID=node3
+      - SCANNER_URL=http://scanner:8000
+      - PORT=8003
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - scanner
+    networks:
+      - lab-network
+
+  node4:
+    build: .
+    command: python agents/MobileNode.py
+    ports:
+      - "8004:8004"
+    environment:
+      - NODE_ID=node4
+      - SCANNER_URL=http://scanner:8000
+      - PORT=8004
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - scanner
+    networks:
+      - lab-network
+
+  node5:
+    build: .
+    command: python agents/MobileNode.py
+    ports:
+      - "8005:8005"
+    environment:
+      - NODE_ID=node5
+      - SCANNER_URL=http://scanner:8000
+      - PORT=8005
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - scanner
+    networks:
+      - lab-network
+
+  node6:
+    build: .
+    command: python agents/MobileNode.py
+    ports:
+      - "8006:8006"
+    environment:
+      - NODE_ID=node6
+      - SCANNER_URL=http://scanner:8000
+      - PORT=8006
+    volumes:
+      - ./data:/app/data
     depends_on:
       - scanner
     networks:

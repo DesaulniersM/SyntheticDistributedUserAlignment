@@ -13,14 +13,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the application code
-COPY VirtualScanner.py .
-COPY ScannerService.py .
-COPY MobileNode.py .
-COPY SimpleICP.py .
-COPY AlignmentSolver.py .
-COPY labModel.obj .
-COPY labModel.mtl .
+# Copy the entire project structure
+COPY common/ ./common/
+COPY environment/ ./environment/
+COPY agents/ ./agents/
+COPY solvers/ ./solvers/
+COPY config/ ./config/
+COPY replica_office1.ply .
 
-# Default command (can be overridden in docker-compose)
-CMD ["python", "ScannerService.py"]
+# Default command (overridden by compose)
+CMD ["python", "environment/ScannerService.py"]

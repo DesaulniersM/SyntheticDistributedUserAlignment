@@ -2,31 +2,8 @@ import requests
 import open3d as o3d
 import numpy as np
 import time
-
-def rotate_vector(vector, angle_degrees, axis='y'):
-    """Helper to rotate a vector around an axis."""
-    rad = np.radians(angle_degrees)
-    if axis == 'y':
-        matrix = np.array([
-            [ np.cos(rad), 0, np.sin(rad)],
-            [ 0,           1, 0          ],
-            [-np.sin(rad), 0, np.cos(rad)]
-        ])
-    return matrix @ np.array(vector)
-
-def get_view_matrix(position, look_at, up):
-    """Calculates the world-to-local matrix (View Matrix)."""
-    z_axis = np.array(look_at) - np.array(position)
-    z_axis = z_axis / np.linalg.norm(z_axis)
-    x_axis = np.cross(np.array(up), z_axis)
-    x_axis = x_axis / np.linalg.norm(x_axis)
-    y_axis = np.cross(z_axis, x_axis)
-    r = np.vstack([x_axis, y_axis, z_axis])
-    t = -r @ np.array(position)
-    view_mat = np.eye(4)
-    view_mat[:3, :3] = r
-    view_mat[:3, 3] = t
-    return view_mat
+from common.conventions import rotate_vector_z, get_view_matrix
+from config.settings import SIGMA_D
 
 def create_camera_frustum(view_matrix, color, scale=1.0):
     pts = np.array([
@@ -50,7 +27,7 @@ def run_visualization_pipeline():
     
     # Node 1 offset
     vec = np.array(pos_2) - np.array(look_at)
-    rotated_vec = rotate_vector(vec, 30, axis='y')
+    rotated_vec = rotate_vector_z(vec, 30)
     pos_1 = (np.array(look_at) + rotated_vec).tolist()
     
     v2 = get_view_matrix(pos_2, look_at, up)

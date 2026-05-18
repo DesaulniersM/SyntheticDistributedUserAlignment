@@ -1,0 +1,39 @@
+# Visual-Spectral Landmark Registration (VSLR) Algorithm Summary
+
+## 1. Overview
+A high-speed, decentralized multi-user point cloud alignment algorithm designed for mobile AR/Robotics. It replaces raw point cloud matching with sparse 3D visual landmarks.
+
+## 2. Basic Algorithmic Steps
+
+### Step 1: Decentralized Perception (Local Node)
+- Capture RGB-D scan from sensor.
+- Detect 2D ORB keypoints and extract descriptors.
+- Back-project pixels to 3D landmarks using camera intrinsics in the Robotics Body Frame.
+- **Complexity:** O(P) where P is the number of pixels. Independent of other users.
+
+### Step 2: Peer-to-Peer Match & Filter (The Edge)
+- Exchange small descriptor packets between two nodes.
+- Perform Brute-Force Hamming matching on ORB descriptors.
+- **Spectral Filtering (Stage 2):** Construct a Spatial Compatibility Matrix (M) for proposed matches and find the principal eigenvector to prune visual outliers.
+- **Complexity:** O(K^2) for matching where K is the number of landmarks; O(M^2) for compatibility matrix where M is the number of matches.
+
+### Step 3: One-Shot Relative Alignment (The Edge)
+- Run 4-DoF (Yaw + 3D Translation) Procrustes analysis using SVD on verified landmarks.
+- Calculate an "Intercluster Score" (s) based on geometric agreement to serve as the edge weight.
+- **Complexity:** O(M) - Instantaneous one-shot calculation.
+
+### Step 4: Global Synchronization (Central/Aggregator)
+- Construct a global Pose Graph where nodes are users and edges are relative transforms.
+- **IRLS-HWA (Stage 3):** Iteratively solve for global poses using a weighted Laplacian sync, updating weights via a Historical Weighted Average (EMA of residuals).
+- **Complexity:** O(E * Iter) where E is the number of edges and Iter is typically 10-15.
+
+## 3. Bottlenecks
+
+### Bottleneck on Accuracy
+- **ORB Precision:** Visual descriptors are sensitive to lighting and viewpoint changes (Perspective Distortion).
+- **Depth Noise:** At distances >3m, small errors in the depth map lead to large errors in the 3D landmark position.
+- **Graph Topology:** If the users have low overlap, the Pose Graph becomes "weak," making the Spectral Sync sensitive to a single bad edge.
+
+### Bottleneck on Complexity
+- **Visual Matching:** As the number of landmarks (K) grows, the O(K^2) matching becomes the dominant cost on a mobile CPU. (Mitigated by using Hamming Distance).
+- **Network Latency:** In a real-world multi-user setup, the time to exchange descriptors over Wi-Fi/5G often exceeds the time to actually run the math.

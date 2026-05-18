@@ -4,6 +4,36 @@ This project simulates a distributed system of mobile devices (Nodes) that perfo
 
 ## System Architecture
 
+```mermaid
+Absolute slop. Come back and fix this TODO
+graph TD
+    subgraph "Simulation Layer"
+        Mesh[labModel.obj] --> VS[VirtualScanner.py]
+        VS --> SS[ScannerService.py]
+    end
+
+    subgraph "Node Layer (Distributed)"
+        SS -- "/scan" --> MN1[MobileNode.py - Node1]
+        SS -- "/scan" --> MN2[MobileNode.py - Node2]
+        MN1 -- "/align" --> MN2
+        MN1 -- "/set_reference" --> MN1
+    end
+
+    subgraph "Solver Layer (Math)"
+        MN1 & MN2 --> AS[AlignmentSolver.py]
+        AS -- "Gravity Locking" --> SICP[SimpleICP.py]
+        SICP -- "RANSAC + SVD" --> AS
+    end
+
+    subgraph "Synchronization Layer (Multi-User)"
+        IA[IncrementalAlignment.py] -- "Pairwise BFS Propagation" --> AS
+        MU[MultiUserAlignment.py] -- "Spectral Angular Sync" --> AS
+    end
+
+    Client[VisualizerClient.py] -- "Orchestrates" --> MN1
+    Client -- "Visualizes" --> O3D[Open3D]
+```
+
 - **Scanner Service (`ScannerService.py`)**: A central service that simulates a depth camera by raycasting against `labModel.obj`. It uses a **Geometric Edge Sampling** strategy to mimic realistic mobile AR feature points.
 - **Mobile Nodes (`MobileNode.py`)**: Distributed agents that request scans, store reference frames, and perform alignments.
 - **Alignment Engines**:
@@ -62,5 +92,5 @@ python3 TestSpectralAlignment.py
 - `VisualizerClient.py`: A comprehensive pipeline that runs a scan, aligns, and opens an Open3D window.
 
 ## Developer Notes
-- **Scaling**: The `SimpleICP.SCALE` constant is set to `6.0` to account for the large dimensions of the `labModel.obj` mesh.
+- **Scaling**: The `SimpleICP.SCALE` constant is set to `1.0` to match the metric scale of the Replica dataset meshes.
 - **Edge Sampling**: The scanner is currently configured to sample 50% from geometric edges and 50% from flat surfaces to balance feature detection and structural alignment.
