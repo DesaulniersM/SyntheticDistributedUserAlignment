@@ -6,7 +6,11 @@ from solvers.global_solvers.MultiUserAlignment import SpectralAlignmentManager
 from common.conventions import get_yaw_from_matrix
 from scipy.optimize import least_squares
 import gtsam
-import pyceres
+try:
+    import pyceres
+except ImportError:
+    pyceres = None
+
 
 class RansacSVDAlignmentManager(SpectralAlignmentManager):
     """
@@ -167,15 +171,15 @@ class GTSAMAlignmentManager(SpectralAlignmentManager):
     """
     def compute_gtsam_global_alignment(self, anchor_id: int, anchor_pose: np.ndarray, initialization='cold', gt_poses=None):
         graph = gtsam.NonlinearFactorGraph()
-        
+
         # 1. Add Prior Factor for the Anchor Node (Hard-pin)
         anchor_key = int(anchor_id)
         prior_noise = gtsam.noiseModel.Isotropic.Sigma(6, 1e-4) # Stiff prior
         graph.add(gtsam.PriorFactorPose3(anchor_key, gtsam.Pose3(anchor_pose), prior_noise))
-        
+
         # 2. Add BetweenFactors for each relative transform
         # Using Robust Huber model to handle outliers fairly
-        base_noise = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.02, 0.02, 0.02, 0.05, 0.05, 0.05])) 
+        base_noise = gtsam.noiseModel.Diagonal.Sigmas(np.array([0.02, 0.02, 0.02, 0.05, 0.05, 0.05]))
         robust_model = gtsam.noiseModel.Robust.Create(gtsam.noiseModel.mEstimator.Huber.Create(1.0), base_noise)
 
         for (i, j), T_ij in self.edge_transforms.items():
@@ -206,7 +210,7 @@ class GTSAMAlignmentManager(SpectralAlignmentManager):
             params = gtsam.LevenbergMarquardtParams()
             optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial_values, params)
             result = optimizer.optimize()
-            
+
             # 5. Store results
             for uid in self.user_ids:
                 self.global_transforms[uid] = result.atPose3(int(uid)).matrix()
@@ -215,7 +219,6 @@ class GTSAMAlignmentManager(SpectralAlignmentManager):
             # Fallback: keep initial values or set to identity
             for uid in self.user_ids:
                 self.global_transforms[uid] = initial_values.atPose3(int(uid)).matrix()
-
 class CeresAlignmentManager(SpectralAlignmentManager):
     """
     Solves the Global Alignment problem using pyceres.

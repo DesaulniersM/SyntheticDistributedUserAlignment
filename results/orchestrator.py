@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import time
 import sys
+from concurrent.futures import ProcessPoolExecutor
+from threading import Lock
 
 # Ensure we can find the project modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -10,6 +12,49 @@ from stress_test_spectral import SpectralStressTester
 
 REGISTRY_PATH = "results/standardized_study.csv"
 MASTER_WORLD_PATH = "results/world_geometry_large.npy"
+
+# Global lock for thread-safe registry writes
+file_lock = Lock()
+
+def run_single_trial(n_users, k, s_type, m_actual, landmarks, master_poses, outliers, noise):
+    """Worker function for parallel trials"""
+    use_lm = (s_type == "LM_Cold" or s_type == "LM_Warm")
+    use_gtsam = (s_type == "GTSAM_Cold" or s_type == "GTSAM_Warm")
+    use_ceres = (s_type == "Ceres_Cold" or s_type == "Ceres_Warm")
+    
+    # Initialize tester inside process
+    tester = SpectralStressTester(use_lm=use_lm, use_gtsam=use_gtsam, use_ceres=use_ceres)
+    
+    tester.load_master_data(
+        master_poses,
+        landmarks,
+        n_users=n_users,
+        outlier_ratio=outliers,
+        noise_std=noise,
+        max_visibility_dist=10.0
+    )
+    
+    if s_type == "LM_Warm" or s_type == "GTSAM_Warm" or s_type == "Ceres_Warm":
+        init_mode = 'warm_gt'
+    elif s_type == "LM_Cold" or s_type == "GTSAM_Cold" or s_type == "Ceres_Cold":
+        init_mode = 'cold'
+    else:
+        init_mode = None
+
+    res = tester.run_test(neighbors_per_node=k, lm_init=init_mode)
+    
+    return {
+        "timestamp": time.strftime("%H:%M:%S"),
+        "solver": s_type,
+        "n_users": n_users,
+        "k_neighbors": k,
+        "m_points": m_actual,
+        "noise_std": noise,
+        "outlier_ratio": outliers,
+        "mean_rmse": res["mean_rmse"],
+        "duration": res["duration"],
+        "edges": res["edges_count"]
+    }
 
 class ExperimentOrchestrator:
     def __init__(self, world_path=MASTER_WORLD_PATH, registry_path=REGISTRY_PATH):
@@ -33,18 +78,26 @@ class ExperimentOrchestrator:
             ])
 
     def save_trial(self, data: dict):
-        self.registry = pd.concat([self.registry, pd.DataFrame([data])], ignore_index=True)
-        self.registry.to_csv(self.registry_path, index=False)
+        with file_lock:
+            # Reload registry to ensure we don't overwrite other processes' work
+            self.registry = self._load_registry()
+            self.registry = pd.concat([self.registry, pd.DataFrame([data])], ignore_index=True)
+            self.registry.to_csv(self.registry_path, index=False)
 
     def run_master_study(self, 
                          n_users_list: list = [20, 40, 60, 80],
                          k_list: list = [2, 3, 4, 5, 8],
                          solvers: list = ["Spectral", "LM_Cold"],
                          m_points: int = None,
-                         trials: int = 1):
+                         trials: int = 1,
+                         max_workers: int = None):
         if self.master_world is None:
             print("Error: Master world not loaded. Run generate_master_world.py first.")
             return
+
+        # Auto-detect workers if not specified
+        if max_workers is None:
+            max_workers = os.cpu_count() or 1
 
         noise = 0.02
         outliers = 0.1
@@ -52,7 +105,6 @@ class ExperimentOrchestrator:
         landmarks_all = self.master_world['landmarks']
         m_actual = m_points or len(landmarks_all)
         
-        # Deterministic subset for landmarks if m_points is set
         if m_points is not None and m_points < len(landmarks_all):
             np.random.seed(42)
             idx = np.random.choice(len(landmarks_all), m_points, replace=False)
@@ -60,14 +112,14 @@ class ExperimentOrchestrator:
         else:
             landmarks = landmarks_all
 
-        print(f"\n>>> Running Master World Study")
+        print(f"\n>>> Running Master World Study ({'Parallel: ' + str(max_workers) if max_workers > 1 else 'Sequential'})")
         print(f"Sweep: N={n_users_list}, K={k_list}, Solvers={solvers}, M={m_actual}, Trials={trials}")
         print("-" * 75)
 
+        tasks = []
         for n_users in n_users_list:
             for k in k_list:
                 for s_type in solvers:
-                    # Count existing trials in registry
                     if not self.registry.empty:
                         mask = (
                             (self.registry['n_users'] == n_users) & 
@@ -75,8 +127,7 @@ class ExperimentOrchestrator:
                             (self.registry['solver'] == s_type) &
                             (self.registry['m_points'] == m_actual)
                         )
-                        existing = self.registry[mask]
-                        count = len(existing)
+                        count = len(self.registry[mask])
                     else:
                         count = 0
                         
@@ -84,47 +135,38 @@ class ExperimentOrchestrator:
                     if needed <= 0:
                         continue
                         
-                    print(f"N={n_users:<2} | K={k:<2} | {s_type:<10} | Running {needed} trials...")
-                    
-                    for t in range(needed):
-                        use_lm = (s_type == "LM_Cold" or s_type == "LM_Warm")
-                        use_gtsam = (s_type == "GTSAM_Cold" or s_type == "GTSAM_Warm")
-                        use_ceres = (s_type == "Ceres_Cold" or s_type == "Ceres_Warm")
-                        tester = SpectralStressTester(use_lm=use_lm, use_gtsam=use_gtsam, use_ceres=use_ceres)
-                        
-                        tester.load_master_data(
-                            self.master_world['user_poses'],
-                            landmarks,
-                            n_users=n_users,
-                            outlier_ratio=outliers,
-                            noise_std=noise,
-                            max_visibility_dist=10.0
-                        )
-                        
-                        if s_type == "LM_Warm" or s_type == "GTSAM_Warm" or s_type == "Ceres_Warm":
-                            init_mode = 'warm_gt'
-                        elif s_type == "LM_Cold" or s_type == "GTSAM_Cold" or s_type == "Ceres_Cold":
-                            init_mode = 'cold'
-                        else:
-                            init_mode = None
+                    print(f"Queueing N={n_users:<2} | K={k:<2} | {s_type:<10} | {needed} trials")
+                    for _ in range(needed):
+                        tasks.append((n_users, k, s_type))
 
-                        res = tester.run_test(neighbors_per_node=k, lm_init=init_mode)
-                        
-                        self.save_trial({
-                            "timestamp": time.strftime("%H:%M:%S"),
-                            "solver": s_type,
-                            "n_users": n_users,
-                            "k_neighbors": k,
-                            "m_points": m_actual,
-                            "noise_std": noise,
-                            "outlier_ratio": outliers,
-                            "mean_rmse": res["mean_rmse"],
-                            "duration": res["duration"],
-                            "edges": res["edges_count"]
-                        })
-                        print(f"  Trial {count + t + 1}/{trials} | RMSE: {res['mean_rmse']:.4f}m | Dur: {res['duration']:.2f}s")
-            
-            print(f"Finished N={n_users} group...")
+        if not tasks:
+            print("No new trials needed.")
+            return
+
+        if max_workers > 1:
+            # Parallel Path
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(run_single_trial, t[0], t[1], t[2], m_actual, landmarks, 
+                                        self.master_world['user_poses'], outliers, noise) for t in tasks]
+                for future in futures:
+                    try:
+                        res_data = future.result()
+                        self.save_trial(res_data)
+                        print(f"  Finished: N={res_data['n_users']:<2} | K={res_data['k_neighbors']:<2} | {res_data['solver']:<10} | RMSE: {res_data['mean_rmse']:.4f}m")
+                    except Exception as e:
+                        print(f"  Trial failed with error: {e}")
+        else:
+            # Sequential Path (Safe for 1-core machines)
+            for t in tasks:
+                try:
+                    res_data = run_single_trial(t[0], t[1], t[2], m_actual, landmarks, 
+                                              self.master_world['user_poses'], outliers, noise)
+                    self.save_trial(res_data)
+                    print(f"  Finished: N={res_data['n_users']:<2} | K={res_data['k_neighbors']:<2} | {res_data['solver']:<10} | RMSE: {res_data['mean_rmse']:.4f}m")
+                except Exception as e:
+                    print(f"  Trial failed with error: {e}")
+        
+        print(f"Study Complete.")
 
     def run_robustness_study(self, 
                              n_users: int = 60, 
