@@ -163,6 +163,7 @@ class LevenbergMarquardtAlignmentManager(SpectralAlignmentManager):
             T[:3, :3] = [[c, -s, 0], [s, c, 0], [0, 0, 1]]
             T[:3, 3] = p
             self.global_transforms[uid] = T
+        return res.nfev # Number of function evaluations as a proxy for iterations
 
 class GTSAMAlignmentManager(SpectralAlignmentManager):
     """
@@ -214,11 +215,13 @@ class GTSAMAlignmentManager(SpectralAlignmentManager):
             # 5. Store results
             for uid in self.user_ids:
                 self.global_transforms[uid] = result.atPose3(int(uid)).matrix()
+            return optimizer.iterations()
         except RuntimeError as e:
             print(f"  GTSAM Error: {e}")
             # Fallback: keep initial values or set to identity
             for uid in self.user_ids:
                 self.global_transforms[uid] = initial_values.atPose3(int(uid)).matrix()
+            return 0
 class CeresAlignmentManager(SpectralAlignmentManager):
     """
     Solves the Global Alignment problem using pyceres.
@@ -456,18 +459,21 @@ class SpectralStressTester:
         """Runs the alignment pipeline and returns performance metrics."""
         start_time = time.time()
         self.manager.select_sparse_edges(neighbors_per_user=neighbors_per_node)
-        self.manager.compute_pairwise_transforms()
         
+        # Stage 2 iterations
+        stage2_iters = self.manager.compute_pairwise_transforms()
+        
+        # Stage 3 iterations
         if self.use_ceres:
-            self.manager.compute_ceres_global_alignment(0, self.gt_poses[0], initialization=lm_init, gt_poses=self.gt_poses)
+            stage3_iters = self.manager.compute_ceres_global_alignment(0, self.gt_poses[0], initialization=lm_init, gt_poses=self.gt_poses)
         elif self.use_gtsam:
-            self.manager.compute_gtsam_global_alignment(0, self.gt_poses[0], initialization=lm_init, gt_poses=self.gt_poses)
+            stage3_iters = self.manager.compute_gtsam_global_alignment(0, self.gt_poses[0], initialization=lm_init, gt_poses=self.gt_poses)
         elif self.use_lm:
-            self.manager.compute_lm_global_alignment(0, self.gt_poses[0], initialization=lm_init, gt_poses=self.gt_poses)
+            stage3_iters = self.manager.compute_lm_global_alignment(0, self.gt_poses[0], initialization=lm_init, gt_poses=self.gt_poses)
         elif use_irls:
-            self.manager.compute_spectral_global_alignment(0, self.gt_poses[0])
+            stage3_iters = self.manager.compute_spectral_global_alignment(0, self.gt_poses[0])
         else:
-            self.manager.compute_l2_global_alignment(0, self.gt_poses[0])
+            stage3_iters = self.manager.compute_l2_global_alignment(0, self.gt_poses[0])
             
         duration = time.time() - start_time
         rmses = []
@@ -480,7 +486,9 @@ class SpectralStressTester:
         return {
             "mean_rmse": np.mean(rmses),
             "duration": duration,
-            "edges_count": len(self.manager.edge_transforms)
+            "edges_count": len(self.manager.edge_transforms),
+            "stage2_iterations": stage2_iters,
+            "stage3_iterations": stage3_iters
         }
 
 def run_salience_study():

@@ -110,17 +110,19 @@ class SpectralAlignmentManager:
 
     def compute_pairwise_transforms(self):
         """Pairs calculate T_ij such that P_i = T_ij @ P_j."""
+        total_stage2_iterations = 0
         for (src_id, tgt_id) in list(self.edge_transforms.keys()):
             # Run Stage 2 Spectral Filtering
             conf_score, cleaned_matches = self._get_spectral_filtered_matches(src_id, tgt_id)
-            
+            total_stage2_iterations += 30 # Each edge uses 30 power iterations
+
             if conf_score < 0.05 or len(cleaned_matches) < 4:
                 print(f"  Edge {src_id}->{tgt_id} rejected by Spectral Filtering (score={conf_score:.4f})")
                 del self.edge_transforms[(src_id, tgt_id)]
                 continue
-            
+
             print(f"  Edge {src_id}->{tgt_id}: Spectral Score={conf_score:.4f}, Inliers={len(cleaned_matches)}")
-            
+
             # Solve using ONLY the spectrally-verified inliers
             T, error = self.solver.run_configured_solver(
                 self.user_clouds[src_id], self.user_clouds[tgt_id],
@@ -128,17 +130,18 @@ class SpectralAlignmentManager:
                 local_gravity=self.user_gravities[tgt_id],
                 correspondences=cleaned_matches
             )
-            
+
             if error == float('inf'):
                 del self.edge_transforms[(src_id, tgt_id)]
             else:
                 self.edge_transforms[(src_id, tgt_id)] = T
                 # Initial weight is the Spectral Intercluster Score
                 self.edge_weights[(src_id, tgt_id)] = conf_score
+        return total_stage2_iterations
 
     def _solve_poses_weighted(self, anchor_id: int, anchor_world_pose: np.ndarray) -> Dict[int, np.ndarray]:
         n = len(self.user_ids); id_to_idx = {uid: i for i, uid in enumerate(self.user_ids)}
-        
+
         # 1. Angular Sync (theta_j - theta_i = theta_ij)
         H = np.zeros((n, n), dtype=complex)
         for (src_id, tgt_id), T in self.edge_transforms.items():
@@ -151,7 +154,7 @@ class SpectralAlignmentManager:
         # Add small regularization to diagonal to ensure connectivity/convergence
         for k in range(n): H[k, k] = 1.0 + 1e-6
         _, vecs = np.linalg.eigh(H); v = vecs[:, -1]
-        
+
         v_anc = v[id_to_idx[anchor_id]]
         if np.abs(v_anc) < 1e-9: v_anc = 1e-9 # Prevent div by zero
         angles_rel = np.angle(v / (v_anc / np.abs(v_anc)))
@@ -159,20 +162,20 @@ class SpectralAlignmentManager:
         for theta in angles_rel:
             c, s = np.cos(theta), np.sin(theta)
             rel_rots.append(np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]]))
-            
+
         # 2. Translation Sync (t_j - t_i = R_i @ t_ij)
         L = np.zeros((n, n)); b = np.zeros((n, 3))
         for (src_id, tgt_id), T in self.edge_transforms.items():
             if T is None: continue
             i_tgt, j_src = id_to_idx[tgt_id], id_to_idx[src_id]
             w = self.edge_weights.get((src_id, tgt_id), 1.0)
-            rhs = rel_rots[i_tgt] @ T[:3, 3] 
+            rhs = rel_rots[i_tgt] @ T[:3, 3]
             L[j_src, j_src] += w; L[i_tgt, i_tgt] += w; L[j_src, i_tgt] -= w; L[i_tgt, j_src] -= w
             b[j_src] += w * rhs; b[i_tgt] -= w * rhs
 
         a_idx = id_to_idx[anchor_id]; L[a_idx, a_idx] += 1e9
         t_rel, _, _, _ = np.linalg.lstsq(L, b, rcond=None)
-        
+
         res = {}
         for k, uid in enumerate(self.user_ids):
             T_rel = np.eye(4); T_rel[:3, :3] = rel_rots[k]; T_rel[:3, 3] = t_rel[k]
@@ -187,6 +190,7 @@ class SpectralAlignmentManager:
         print("Starting Naive L2 Global Synchronization...")
         self.global_transforms = self._solve_poses_weighted(anchor_id, anchor_world_pose)
         print("L2 Registration Complete.")
+        return 1 # Single pass
 
     def compute_spectral_global_alignment(self, anchor_id: int, anchor_world_pose: np.ndarray):
         """Stage 3: IRLS-HWA (Historical Weighted Average)"""
@@ -195,13 +199,12 @@ class SpectralAlignmentManager:
         vt_ema = {edge: 0.0 for edge in edges}; last_delta = {edge: 0.0 for edge in edges}
 
         print(f"Starting SMVR Stage 3 (IRLS-HWA) for {self.irls_iterations} iterations...")
-        
+
         for it in range(self.irls_iterations):
             current_poses = self._solve_poses_weighted(anchor_id, anchor_world_pose)
             for edge in edges:
                 src, tgt = edge; T_ij_obs = self.edge_transforms[edge]
                 if T_ij_obs is None: continue
-                
                 T_ij_fit = np.linalg.inv(current_poses[tgt]) @ current_poses[src]
                 yaw_fit = get_yaw_from_matrix(T_ij_fit)
                 yaw_obs = get_yaw_from_matrix(T_ij_obs)
@@ -219,6 +222,7 @@ class SpectralAlignmentManager:
 
         self.global_transforms = self._solve_poses_weighted(anchor_id, anchor_world_pose)
         print("Registration Complete.")
+        return self.irls_iterations
 
     def select_sparse_edges(self, neighbors_per_user: int = 3):
         # Create sparse candidate graph using centroids from features

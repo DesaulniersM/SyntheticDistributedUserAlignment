@@ -53,7 +53,9 @@ def run_single_trial(n_users, k, s_type, m_actual, landmarks, master_poses, outl
         "outlier_ratio": outliers,
         "mean_rmse": res["mean_rmse"],
         "duration": res["duration"],
-        "edges": res["edges_count"]
+        "edges": res["edges_count"],
+        "stage2_iters": res.get("stage2_iterations", 0),
+        "stage3_iters": res.get("stage3_iterations", 0)
     }
 
 class ExperimentOrchestrator:
@@ -74,7 +76,8 @@ class ExperimentOrchestrator:
         else:
             return pd.DataFrame(columns=[
                 "timestamp", "solver", "n_users", "k_neighbors", "m_points", 
-                "noise_std", "outlier_ratio", "mean_rmse", "duration", "edges"
+                "noise_std", "outlier_ratio", "mean_rmse", "duration", "edges",
+                "stage2_iters", "stage3_iters"
             ])
 
     def save_trial(self, data: dict):
