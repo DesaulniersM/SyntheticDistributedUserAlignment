@@ -2,7 +2,12 @@
 *.venv
 *venv
 *__pycache__
-results/
+# Ignore large data and generated artifacts, but keep scripts
+results/*.csv
+results/*.npy
+results/*.png
+results/*.ply
+results/*.log
 *.ply
 *.png
 *.csv
