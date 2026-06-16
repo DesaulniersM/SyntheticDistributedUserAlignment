@@ -37,7 +37,34 @@ This document outlines the roadmap to transition the current prototype into a pu
 - **ScanNet:** For diverse, real-world indoor messy scenes.
 - **Matterport3D:** For large-scale, multi-room building scans.
 
-### 5. Potential Venues
-- **ICRA / IROS:** Leading robotics conferences (Focus on the decentralized/multi-user aspect).
-- **ISMAR:** Top Augmented Reality conference (Focus on the low-power/mobile speedup).
-- **IEEE TGRS:** High-impact journal (Focus on the spectral math and wavelet theory).
+### 6. Standard of Rigor for ACM/IEEE Publication
+To ensure submission-ready results for high-impact venues (ICRA, IROS, ISMAR), the following methodological standards are adopted:
+
+1. **Standardized Baselines:** All iterative optimization results must be compared against industry-standard solvers (**GTSAM** or **Ceres**) rather than custom scripts. This prevents "strawman" comparisons and ensures scientific fairness.
+2. **Realistic Sensing Constraints:**
+   - **Heading-Limited FOV:** Agents must only observe landmarks within a 90° horizontal Field of View, creating realistic asymmetric overlaps.
+   - **Clustered Geometry:** Landmarks are distributed as discrete objects (clustered and stratified) rather than uniform "fog" to test structural sensitivity.
+3. **Advanced Robotics Metrics:**
+   - **APE (Absolute Pose Error):** To measure global map consistency.
+   - **RPE (Relative Pose Error):** To measure local drift between neighbors.
+   - **Success Rate Statistics:** Percentage of trials achieving <5cm convergence across N trials.
+4. **Efficiency Frontier:** Generation of Pareto charts (Latency vs. Accuracy) to demonstrate the algorithm's position as the optimal trade-off for battery-powered AR devices.
+
+### 7. Decentralization Architecture & Scientific Novelty
+As the system transitions from a simulated single-node testbed to a true distributed multi-robot deployment, the architectural advantages of the Spectral method over iterative solvers (D-PGO) become a central narrative for publication.
+
+#### The Communication Bottleneck in D-PGO
+Traditional Distributed Pose Graph Optimization (D-PGO) methods (e.g., decentralized GTSAM or ADMM-based iterative solvers) rely on the exchange of Separator Marginals or gradient updates. 
+- **The Iterative Penalty:** These methods require robots to broadcast dense matrices to their neighbors at *every iteration* of the optimization.
+- **Latency Vulnerability:** In a sparse network, the total time to convergence is dictated by network latency and the number of communication rounds, not CPU speed. A 50-iteration solve requires 50 sequential network hops.
+
+#### The Spectral Advantage
+The proposed Spectral Synchronization architecture is highly amenable to bandwidth-constrained environments:
+- **Phase 1: Local Peer-to-Peer Filtering (Fully Decentralized):** The construction of the Spatial Compatibility Matrix ($M$) and its principal eigenvector occurs exclusively between pairs of neighboring robots. This step is independent and parallelizes perfectly across the swarm.
+- **Phase 2: Global Relaxation (Single-Shot Sync):** Unlike iterative methods, Spectral Synchronization formulates the global alignment as a direct Eigen-problem on the Connection Laplacian ($H$). In a decentralized setting, this can be resolved via Distributed Power Iteration (Gossip algorithms) or passed to a central compute node. Because it is a non-iterative, global relaxation, it avoids the "Cold Start" local minima traps that plague D-PGO in sparse networks.
+
+#### State-of-the-Art Novelty Context
+Has this been done before?
+- **SE-Sync (Rosen et al., 2017) & Certifiably Correct PGO:** SE-Sync uses Riemannian optimization and spectral relaxations to find the globally optimal pose graph. It is the gold standard for avoiding local minima in SLAM.
+- **Kimera-Multi & Distributed PGO:** State-of-the-art multi-robot systems have begun implementing distributed versions of these robust solvers.
+- **Your Novelty:** Your specific contribution is the **Pre-Synchronization Pruning via Algebraic Connectivity**. Methods like SE-Sync assume the edges of the pose graph are somewhat reliable. Your Stage 2 uses the Spatial Compatibility Matrix's eigenvector to assign *confidence weights* (or delete edges entirely) based on geometric rigidity *before* the global synchronization occurs. The combination of local spectral pruning (robustness to outliers) with global spectral synchronization (robustness to initialization) in extremely sparse, large-scale networks is a compelling and highly publishable architectural contribution.

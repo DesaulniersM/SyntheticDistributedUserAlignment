@@ -104,7 +104,7 @@ class SpectralAlignmentManager:
         # Elements of v represent confidence in each match [0, 1]
         v = v.flatten()
         threshold = np.median(v) # Dynamic threshold based on cluster density
-        cleaned_matches = [mutual_matches[i] for i in range(num_m) if v[i] > threshold]
+        cleaned_matches = [mutual_matches[i] for i in range(num_m) if v[i] >= threshold]
         
         return score_s, cleaned_matches
 
@@ -179,6 +179,15 @@ class SpectralAlignmentManager:
             res[uid] = anchor_world_pose @ T_rel
         return res
 
+    def compute_l2_global_alignment(self, anchor_id: int, anchor_world_pose: np.ndarray):
+        """
+        Performs a single-pass L2 Least Squares synchronization.
+        This ignores the IRLS iterative weights and provides a baseline.
+        """
+        print("Starting Naive L2 Global Synchronization...")
+        self.global_transforms = self._solve_poses_weighted(anchor_id, anchor_world_pose)
+        print("L2 Registration Complete.")
+
     def compute_spectral_global_alignment(self, anchor_id: int, anchor_world_pose: np.ndarray):
         """Stage 3: IRLS-HWA (Historical Weighted Average)"""
         edges = list(self.edge_transforms.keys())
@@ -212,11 +221,38 @@ class SpectralAlignmentManager:
         print("Registration Complete.")
 
     def select_sparse_edges(self, neighbors_per_user: int = 3):
-        # Create fully connected candidate graph
+        # Create sparse candidate graph using centroids from features
+        # In our stress test, user_features[:, :3] are world coordinates.
         self.edge_transforms = {}
-        for i in range(len(self.user_ids)):
-            for j in range(i + 1, len(self.user_ids)):
-                self.edge_transforms[(self.user_ids[i], self.user_ids[j])] = None
+        n = len(self.user_ids)
+        if n <= 1: return
+
+        centroids = []
+        for uid in self.user_ids:
+            if uid in self.user_features and len(self.user_features[uid]) > 0:
+                centroids.append(np.mean(self.user_features[uid][:, :3], axis=0))
+            else:
+                # Fallback to local (less ideal)
+                centroids.append(np.mean(self.user_clouds[uid], axis=0))
+        centroids = np.array(centroids)
+        
+        tree = cKDTree(centroids)
+        for i, uid in enumerate(self.user_ids):
+            # Query k+1 neighbors because the closest is the node itself
+            k = min(neighbors_per_user + 1, n)
+            dists, indices = tree.query(centroids[i], k=k)
+            
+            # Ensure indices is iterable even if k=1
+            if k == 1:
+                indices = [indices]
+            
+            for idx in indices:
+                neighbor_id = self.user_ids[idx]
+                if uid == neighbor_id: continue
+                
+                # Use a canonical order for edge keys
+                edge = tuple(sorted((uid, neighbor_id)))
+                self.edge_transforms[edge] = None
 
     def get_global_cloud(self, uid: int) -> np.ndarray:
         T = self.global_transforms.get(uid, np.eye(4)); pts = self.user_clouds[uid]

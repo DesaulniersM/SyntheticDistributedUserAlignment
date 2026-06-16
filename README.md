@@ -1,45 +1,41 @@
 # Point Cloud Alignment Simulator
 
-This project simulates a distributed system of mobile devices (Nodes) that perform peer-to-peer 4-DoF point cloud alignment using synthetic data generated from a 3D mesh.
+This project simulates a distributed system of mobile devices (Nodes) that perform peer-to-peer 4-DoF point cloud alignment using synthetic data generated from a 3D mesh. It implements the **Visual-Spectral Landmark Registration (VSLR-Sync)** research framework.
 
 ## System Architecture
 
 ```mermaid
-Absolute slop. Come back and fix this TODO
 graph TD
     subgraph "Simulation Layer"
-        Mesh[labModel.obj] --> VS[VirtualScanner.py]
-        VS --> SS[ScannerService.py]
+        Mesh[labModel.obj] --> SS[ScannerService.py]
     end
 
     subgraph "Node Layer (Distributed)"
-        SS -- "/scan" --> MN1[MobileNode.py - Node1]
-        SS -- "/scan" --> MN2[MobileNode.py - Node2]
-        MN1 -- "/align" --> MN2
-        MN1 -- "/set_reference" --> MN1
+        SS -- "/scan" --> MN[MobileNode.py - Nodes 1-6]
+        MN -- "/align-with-peer" --> MN
+        MN -- "/set-reference" --> MN
     end
 
-    subgraph "Solver Layer (Math)"
-        MN1 & MN2 --> AS[AlignmentSolver.py]
-        AS -- "Gravity Locking" --> SICP[SimpleICP.py]
-        SICP -- "RANSAC + SVD" --> AS
+    subgraph "SMVR Solver Pipeline (Multi-User)"
+        MN --> S1[Stage 1: Sparse Edge Selection]
+        S1 --> S2[Stage 2: Spatial Compatibility Matrix]
+        S2 --> S3[Stage 3: Global IRLS-HWA Sync]
     end
 
-    subgraph "Synchronization Layer (Multi-User)"
-        IA[IncrementalAlignment.py] -- "Pairwise BFS Propagation" --> AS
-        MU[MultiUserAlignment.py] -- "Spectral Angular Sync" --> AS
+    subgraph "Feature Engine"
+        MN --> FE[VisualFeatureEngine]
+        FE --> ORB[ORB-3D Landmarks]
+        FE --> HW[Haar-Wavelet Gists]
     end
 
-    Client[VisualizerClient.py] -- "Orchestrates" --> MN1
+    Client[VisualizerClient.py] -- "Orchestrates" --> MN
     Client -- "Visualizes" --> O3D[Open3D]
 ```
 
-- **Scanner Service (`ScannerService.py`)**: A central service that simulates a depth camera by raycasting against `labModel.obj`. It uses a **Geometric Edge Sampling** strategy to mimic realistic mobile AR feature points.
-- **Mobile Nodes (`MobileNode.py`)**: Distributed agents that request scans, store reference frames, and perform alignments.
-- **Alignment Engines**:
-    - **SimpleICP**: Core 4-DoF (Yaw + 3D Translation) solver using RANSAC and SVD-based ICP.
-    - **Incremental (BFS)**: Path-based propagation of transforms from an anchor node. Stable for small groups.
-    - **Spectral (1D)**: Angular Synchronization using complex eigenvectors to solve for global consensus yaws. Robust against drift in larger groups.
+- **Scanner Service (`ScannerService.py`)**: A central service that simulates an RGB-D camera by raycasting against `labModel.obj`. It uses a **Geometric Edge Sampling** strategy to mimic realistic mobile AR feature points.
+- **Mobile Nodes (`MobileNode.py`)**: Distributedagents that request scans, store reference frames, and perform alignments.
+- **SMVR Solver (`MultiUserAlignment.py`)**: A 3-stage spectral pipeline that solves for global consensus poses using algebraic connectivity and spatial consistency.
+- **Wavelet Utilities (`wavelet_utils.py`)**: Experimental Haar-Wavelet descriptor compression for low-bandwidth AR synchronization.
 
 ## Setup
 
@@ -55,42 +51,42 @@ docker-compose up -d --build
 ```
 This starts:
 - `scanner` at `http://localhost:8000`
-- `node1` at `http://localhost:8001`
-- `node2` at `http://localhost:8002`
+- `node1-node6` at `http://localhost:8001-8006`
 
-## Running Tests
+## Running Benchmarks & Tests
 
-### 1. Local Math Verification
-Verify the core SimpleICP logic without network overhead using synthetic L-shaped structures.
+### 1. Mathematical Validation (SMVR)
+Verify the core spectral and synchronization logic using noise-injected synthetic data.
 ```bash
-python3 test_alignment_local.py
+python3 validate_smvr.py
 ```
 
-### 2. Headless Service Test
-Verify that the Docker containers are communicating correctly and can perform a basic two-node alignment.
+### 2. Full System Networked Benchmark
+Orchestrates a 6-node scan and global alignment using the live Docker services.
 ```bash
-python3 test_alignment_headless.py
+python3 benchmark_visual_spectral.py
 ```
 
-### 3. Multi-User Incremental Alignment (BFS)
-Tests the propagation of poses through a sparse graph of 5 users using the BFS approach.
+### 3. Visual Feature (ORB-3D) Test
+Verifies the landmark extraction and back-projection from the scanner.
 ```bash
-python3 TestGlobalAlignment.py
+python3 test_visual_features.py
 ```
 
-### 4. Multi-User Spectral Synchronization
-Tests the global consensus solver using 1D Angular Synchronization for 6 users.
+### 4. Stress Testing & Scaling
+Run rigorous multi-trial scaling studies (N=60+) using the tools in the `results/` directory.
 ```bash
-python3 TestSpectralAlignment.py
+python3 results/benchmark_salience.py
 ```
 
 ## Key Files
-- `SimpleICP.py`: The core mathematical alignment logic.
-- `VirtualScanner.py`: Handles raycasting and edge-prioritized sampling.
-- `MultiUserAlignment.py`: Contains the `SpectralAlignmentManager`.
-- `IncrementalAlignment.py`: Contains the `GlobalAlignmentManager` (BFS).
-- `VisualizerClient.py`: A comprehensive pipeline that runs a scan, aligns, and opens an Open3D window.
+- `solvers/global_solvers/MultiUserAlignment.py`: The 3-Stage Spectral Sync implementation.
+- `common/visual_features.py`: The landmark extraction engine.
+- `common/wavelet_utils.py`: Haar-Wavelet transform and Gist generation.
+- `environment/ScannerService.py`: The raycasting-based virtual sensor.
+- `VisualizerClient.py`: Orchestrates simulations and visualizes global map consistency.
 
-## Developer Notes
-- **Scaling**: The `SimpleICP.SCALE` constant is set to `1.0` to match the metric scale of the Replica dataset meshes.
-- **Edge Sampling**: The scanner is currently configured to sample 50% from geometric edges and 50% from flat surfaces to balance feature detection and structural alignment.
+## Mathematical Conventions
+- **Coordinate System**: Z-Up, Right-Handed (Robotics REP-103).
+- **Degrees of Freedom**: 4-DoF (Yaw + 3D Translation).
+- **Scale**: Metric (1.0).

@@ -8,3 +8,4 @@ pydantic
 pyquaternion
 pandas
 scipy
+gtsam
