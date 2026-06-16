@@ -23,7 +23,11 @@ def run_comparison():
     # - GTSAM_Warm: Initialized with Noisy GT (The baseline with a "head start")
     solvers = ["Spectral", "GTSAM_Warm"]
     
+<<<<<<< HEAD
     trials = 30 # Run 30 trials per cell to get full statistics
+=======
+    trials = 1 # Start with 10 trials per cell to get initial stats
+>>>>>>> 629928ba12aed279b0ddc21fddbe37555bd30e63
     
     # 3. Execute
     orchestrator.run_master_study(
